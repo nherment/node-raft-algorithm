@@ -1,0 +1,27 @@
+{
+  "name": "raft",
+  "version": "0.1.0",
+  "description": "node.js implementation of the RAFT consensus algorithm",
+  "main": "raft.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "mocha --reporter spec"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/nherment/raft-consensus.git"
+  },
+  "keywords": [
+    "raft",
+    "consensus",
+    "distributed"
+  ],
+  "author": "Nicolas Herment <nherment@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/nherment/raft-consensus/issues"
+  },
+  "homepage": "https://github.com/nherment/raft-consensus"
+}
