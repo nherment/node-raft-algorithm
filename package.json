@@ -1,5 +1,5 @@
 {
-  "name": "raft",
+  "name": "raft-algorithm",
   "version": "0.1.0",
   "description": "node.js implementation of the RAFT consensus algorithm",
   "main": "raft.js",
