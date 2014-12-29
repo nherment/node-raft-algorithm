@@ -25,9 +25,11 @@
   },
   "homepage": "https://github.com/nherment/raft-consensus",
   "dependencies": {
+    "callsite": "^1.0.0",
     "lodash": "^2.4.1",
     "loopy": "^0.3.0",
     "mocha": "^2.1.0",
+    "moment": "^2.8.4",
     "uuid": "^2.0.1"
   }
 }

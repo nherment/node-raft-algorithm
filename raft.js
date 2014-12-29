@@ -1,20 +1,13 @@
 
 var Server = require('./lib/Server.js')
 var State = require('./lib/State.js')
+var logger = require('./lib/Logger.js')
 var Loopy = require('loopy')
 var _ = require('lodash')
-var uuid = require('uuid')
 
-var _id = 0
-function id() {
-  return _id++
-}
-
-uuid.v4 = id
 
 function Raft(serverTransport) {
   var self = this
-  this._id = uuid.v4()
   this._transport = serverTransport
   this._state = new State()
   this._server = new Server(this._state)
@@ -28,38 +21,56 @@ function Raft(serverTransport) {
   })
 
   this._heartbeatLoop.on('tick', function(callback) {
-    console.log(self.id(), 'heartbeatLoop')
+    logger.debug(self._state.id(), 'heartbeatLoop')
     var nodeCount = self._nodes.length
     var commitTreshold = Math.floor(nodeCount/2) + 1
+      
     _.each(self._nodes, function(node) {
+      
       var prevLogIndex = node.matchIndex()
-      var prevLogTerm = 0
-      var entries = self._state.getLogEntries(prevLogIndex+1, null)
-
+      var prevLogTerm
+      var nextIndex = node.nextIndex() || 0
+      var entries = self._state.getLogEntries(nextIndex)
+      var lastIndexSent = Math.max( nextIndex - 1, 0 )
+      
       var prevLogEntry = self._state.getLogEntry(prevLogIndex)
-      if(prevLogEntry) {
+      
+      if(prevLogEntry && prevLogIndex !== nextIndex) {
         prevLogTerm = prevLogEntry.term
+        lastIndexSent = prevLogIndex
+      } else {
+        prevLogIndex = null
+        prevLogTerm = null
       }
       
-      var lastIndexSent = entries.length + prevLogIndex
-      console.log('>>', prevLogIndex, prevLogTerm, entries)
+      lastIndexSent += entries.length
+      
+      logger.debug('leader sending >',
+                   'term:', self._state.term(),
+                   'leaderId:', self._state.id(),
+                   'prevLogIndex:', prevLogIndex,
+                   'prevLogTerm:', prevLogTerm,
+                   'entries:', entries.length)
+      
+      node.nextIndex(lastIndexSent)
       node.appendEntries(self._state.term(),
-                         self.id(),
+                         self._state.id(),
                          prevLogIndex,
                          prevLogTerm,
                          entries,
                          self._state.commitIndex(),
                          function(err, response) {
         if(err) { throw err }
-                             
+        
         if(response && response.term > self._state.term()) {
-          console.log(self.id(), 'downgrading to follower')
+          logger.debug(self._state.id(), 'downgrading to follower')
           self._heartbeatLoop.stop()
         }
         
         if(response && response.ack) {
-          console.log('ack', prevLogIndex+1, lastIndexSent)
-          self._state.ackLog(commitTreshold, prevLogIndex+1, lastIndexSent)
+          logger.debug('ack', nextIndex, lastIndexSent)
+          self._state.ackLog(commitTreshold, nextIndex, lastIndexSent)
+          node.matchIndex(lastIndexSent)
         }
       })
     })
@@ -73,7 +84,7 @@ function Raft(serverTransport) {
   })
 
   this._electionTimeout.on('tick', function(callback) {
-    console.log(self.id(), 'electionTimeout') 
+    logger.debug(self._state.id(), 'electionTimeout') 
     callback()
     self.becomeCandidate()
   })
@@ -152,7 +163,7 @@ Raft.prototype.becomeCandidate = function() {
 
   this._state.term(this._state.term() + 1)
     
-  this._state.votedFor(this.id())
+  this._state.votedFor(this._state.id())
   var self = this
   this._electionTimeout.setInterval(randomElectionTimeout())
   this._electionTimeout.reset()
@@ -161,16 +172,16 @@ Raft.prototype.becomeCandidate = function() {
   var lastLogEntry = this._state.getLogEntry(lastIndex)
   _.each(this._nodes, function(node) {
     node.requestVote(self._state.term(), 
-                     self.id(),
+                     self._state.id(),
                      lastIndex,
                      lastLogEntry ? lastLogEntry.term : 0,
                      function(err, response) {
-      console.log(self.id(), 'receivedVote', voteCount, err, response)
+      logger.debug(self._state.id(), 'receivedVote', voteCount, err, response)
       if(response && response.voteGranted) {
         voteCount ++
       }
       if(voteCount > (self._nodes.length / 2)) {
-        console.log(self.id(), 'becoming leader')
+        logger.debug(self._state.id(), 'becoming leader')
         self._electionTimeout.stop()
         self._heartbeatLoop.start(/*now*/ true)
       }
@@ -184,10 +195,6 @@ Raft.prototype.start = function(callback) {
 
 Raft.prototype.stop = function(callback) {
   this._transport.stop(callback)
-}
-
-Raft.prototype.id = function() {
-  return this._id
 }
 
 Raft.prototype.isLeader = function() {
