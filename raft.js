@@ -18,6 +18,19 @@ function Raft(serverTransport) {
   this._server = new Server(this._state)
   this._nodes = []
   this._clientRequestsCallbacks = {}
+
+  this._minElectionTimeout = 150
+  this._maxElectionTimeout = 300
+
+  this._state.on('follower', function() {
+    self._becomeFollower()
+  })
+  this._state.on('candidate', function() {
+    self._becomeCandidate()
+  })
+  this._state.on('leader', function() {
+    self._becomeLeader()
+  })
     
   this._heartbeatLoop = new Loopy({
     interval: 20,
@@ -33,9 +46,12 @@ function Raft(serverTransport) {
       
       var prevLogIndex = node.matchIndex()
       var prevLogTerm
-      var nextIndex = node.nextIndex() || 0
+      var nextIndex = node.nextIndex()
       var entries = self._state.getLogEntries(nextIndex)
-      var lastIndexSent = Math.max( nextIndex - 1, 0 )
+      var lastIndexSent
+      if(nextIndex > 0) {
+        lastIndexSent = nextIndex - 1
+      }
       
       var prevLogEntry = self._state.getLogEntry(prevLogIndex)
       
@@ -47,16 +63,22 @@ function Raft(serverTransport) {
         prevLogTerm = null
       }
       
-      lastIndexSent += entries.length
-      
       logger.debug('leader sending >',
                    'term:', self._state.term(),
                    'leaderId:', self._state.id(),
                    'prevLogIndex:', prevLogIndex,
                    'prevLogTerm:', prevLogTerm,
                    'entries:', entries.length)
+
+      if(!lastIndexSent && entries.length > 0) {
+        lastIndexSent = entries.length - 1
+      } else {
+        lastIndexSent += entries.length
+      }
+      if(lastIndexSent >= 0) {
+        node.nextIndex(lastIndexSent+1)
+      }
       
-      node.nextIndex(lastIndexSent)
       node.appendEntries(self._state.term(),
                          self._state.id(),
                          prevLogIndex,
@@ -71,9 +93,7 @@ function Raft(serverTransport) {
         }
         
         if(response && response.term > self._state.term()) {
-          logger.info('node', self.id(), 'stepping down to follower')
-          self._heartbeatLoop.stop()
-          self.emit('follower')
+          self._state.role('follower')
         }
         
         if(response && response.ack) {
@@ -87,15 +107,19 @@ function Raft(serverTransport) {
   })
 
   this._electionTimeout = new Loopy({
-    interval: randomElectionTimeout(),
+    interval: this._randomElectionTimeout(),
     count: -1, // infinity
     onError: Loopy.OnError.IGNORE
   })
 
   this._electionTimeout.on('tick', function(callback) {
-    logger.warn(self._state.id(), 'electionTimeout') 
-    callback()
-    self.becomeCandidate()
+    logger.warn('node', self._state.id(), 'electionTimeout')
+    setImmediate(callback)
+    if(self._state.role() === 'candidate') {
+      self._state.emit('candidate')
+    } else {
+      self._state.role('candidate')
+    }
   })
 
   this._transport.on('data', function(data, callback) {
@@ -117,7 +141,19 @@ function Raft(serverTransport) {
                                  data.candidateId,
                                  data.lastLogIndex,
                                  data.lastLogTerm,
-                                 callback)
+                                 function(err, response) {
+                                   if(response && response.voteGranted) {
+                                     
+                                     // TODO: step down if candidate or leader
+                                     // TODO: if a server receives a RequestVote
+                                     //       RPC within the minimum election timeout
+                                     //       of hearing from a current leader, it
+                                     //       does not update its term or grant its
+                                     //       vote.
+                                     //self._becomeFollower()
+                                   }
+                                   callback(err, response)
+                                 })
         break
         
       default:
@@ -154,7 +190,22 @@ Raft.prototype.append = function(log, callback) {
   this._clientRequestsCallbacks[index] = callback
 }
 
-Raft.prototype.becomeCandidate = function() {
+Raft.prototype._becomeLeader = function() {
+  logger.info('node', this.id(), 'becoming leader')
+  this._electionTimeout.stop()
+  this._heartbeatLoop.start(/*now*/ true)
+  this.emit('leader')
+}
+
+Raft.prototype._becomeFollower = function() {
+  logger.info('node', this.id(), 'stepping down to follower')
+  this._electionTimeout.start()
+  this._electionTimeout.reset()
+  this._heartbeatLoop.stop()
+  this.emit('follower')
+}
+
+Raft.prototype._becomeCandidate = function() {
   // Candidates (§5.2):
   // - On conversion to candidate, start election:
   //    - Increment currentTerm
@@ -167,13 +218,17 @@ Raft.prototype.becomeCandidate = function() {
   // - If election timeout elapses: start new election
 
   logger.info('node', this.id(), 'becoming candidate')
+  this._heartbeatLoop.stop()
   this.emit('candidate')
   
   this._state.term(this._state.term() + 1)
     
   this._state.votedFor(this._state.id())
   var self = this
-  this._electionTimeout.setInterval(randomElectionTimeout())
+  this._electionTimeout.setInterval(this._randomElectionTimeout())
+  if(this._electionTimeout.status() !== Loopy.Status.STARTED) {
+    self._electionTimeout.start()
+  }
   this._electionTimeout.reset()
   var voteCount = 1 // voted for itself
   var lastIndex = self._state.lastApplied()
@@ -181,7 +236,7 @@ Raft.prototype.becomeCandidate = function() {
   var elected = false
   _.each(this._nodes, function(node) {
       
-    logger.info('requesting vote from', node.id())
+    logger.info(self.id(), 'requesting vote from', node.id())
     node.requestVote(self._state.term(), 
                      self._state.id(),
                      lastIndex,
@@ -201,15 +256,11 @@ Raft.prototype.becomeCandidate = function() {
       logger.info(self.id(),
                   'received vote.',
                   'voteCount:', voteCount,
-                  'from:', node.id,
+                  'from:', node.id(),
                   'granted:', response.voteGranted)
                          
       if(!elected && voteCount > (self._nodes.length / 2)) {
-        elected = true
-        logger.info('node', self.id(), 'becoming leader')
-        self._electionTimeout.stop()
-        self._heartbeatLoop.start(/*now*/ true)
-        self.emit('leader')
+        self._state.role('leader')
       }
     })
   })
@@ -243,15 +294,38 @@ Raft.prototype.stop = function(callback) {
 }
 
 Raft.prototype.isLeader = function() {
-  return this._heartbeatLoop.status() === Loopy.Status.STARTED
+  return this._state.role() === 'leader'
 }
 
 Raft.prototype.id = function() {
   return this._state.id()
 }
 
-function randomElectionTimeout() {
-  return Math.floor(Math.random() * 150) + 150
+/** retrieve the logs in that node, regardless of their commit status
+ *
+ */
+Raft.prototype.logs = function(fromIndex, toIndex) {
+  return this._state.getLogEntries(fromIndex, toIndex)
+}
+Raft.prototype.maxElectionTimeout = function(maxElectionTimeout) {
+  if(maxElectionTimeout !== undefined) {
+    this._maxElectionTimeout = maxElectionTimeout
+  } else {
+    return this._maxElectionTimeout
+  }
+}
+Raft.prototype.minElectionTimeout = function(minElectionTimeout) {
+  if(minElectionTimeout !== undefined) {
+    // TODO: assert that the min is not less than the max
+    this._minElectionTimeout = minElectionTimeout
+  } else {
+    return this._minElectionTimeout
+  }
+}
+
+Raft.prototype._randomElectionTimeout = function() {
+  return Math.floor(Math.random() * (this._maxElectionTimeout - this._minElectionTimeout)) +
+         this._minElectionTimeout
 }
 
 module.exports = Raft
