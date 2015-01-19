@@ -63,14 +63,16 @@ function Raft(serverTransport) {
         prevLogTerm = null
       }
       
-      logger.debug('leader sending >',
+      logger.info('leader sending',
                    'term:', self._state.term(),
                    'leaderId:', self._state.id(),
                    'prevLogIndex:', prevLogIndex,
                    'prevLogTerm:', prevLogTerm,
-                   'entries:', entries.length)
+                   'lastIndexSent:', lastIndexSent,
+                   'nextIndex:', nextIndex,
+                   'entries:', JSON.stringify(entries))
 
-      if(!lastIndexSent && entries.length > 0) {
+      if((_.isUndefined(lastIndexSent) || _.isNull(lastIndexSent)) && entries.length > 0) {
         lastIndexSent = entries.length - 1
       } else {
         lastIndexSent += entries.length
@@ -97,7 +99,7 @@ function Raft(serverTransport) {
         }
         
         if(response && response.ack) {
-          logger.debug('ack', node.id(), nextIndex, lastIndexSent)
+          logger.debug('ack from node', node.id(), 'nextIndex:', nextIndex, 'lastIndexSent:', lastIndexSent)
           self._state.ackLog(commitTreshold, nextIndex, lastIndexSent)
           node.matchIndex(lastIndexSent)
         }
@@ -164,6 +166,7 @@ function Raft(serverTransport) {
   })
 
   this._state.on('commit', function(commitIndex) {
+    
     if(self._clientRequestsCallbacks.hasOwnProperty(commitIndex)) {
       var callback = self._clientRequestsCallbacks[commitIndex]
       delete self._clientRequestsCallbacks[commitIndex]

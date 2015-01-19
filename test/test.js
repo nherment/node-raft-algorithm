@@ -146,7 +146,7 @@ describe('leader election', function() {
   })
   
   
-  it('setup 3 nodes, append log', function(done) {
+  it('setup 3 nodes, append logs', function(done) {
     var server1 = new Raft(new InMemoryTransport())
     var server2 = new Raft(new InMemoryTransport())
     var server3 = new Raft(new InMemoryTransport())
@@ -182,34 +182,43 @@ describe('leader election', function() {
       assert.ok(leader)
 
       leader.append(1, function(err) {
-
-        // at least another follower should have the logs
-        var followerLogs
-        if(server1 !== leader) {
-          assert.ok(!server1.isLeader())
-          followerLogs = server1.logs(0)
-        }
-
-        if(server2 !== leader) {
-          assert.ok(!server2.isLeader())
-          followerLogs = followerLogs || server2.logs(0)
-        }
-
-        if(server3 !== leader) {
-          assert.ok(!server3.isLeader())
-          followerLogs = followerLogs || server3.logs(0)
-        }
-
-        assert.ok(leader.logs())
-        assert.equal(leader.logs().length, 1)
-
-        for(var i = 0 ; i < leader.logs().length ; i++) {
-          var leaderLogEntry = leader.logs()[i]
-          var followerLogEntry = followerLogs[i]
-          assert.ok(_.isEqual(leaderLogEntry, followerLogEntry))
-        }
-        done()
+        assert.ok(!err, err)
+        
+        leader.append(2, function(err) {
+          assert.ok(!err, err)
           
+          leader.append(3, function(err) {
+            assert.ok(!err, err)
+            
+            // at least another follower should have the logs
+            var followerLogs
+            if(server1 !== leader) {
+              assert.ok(!server1.isLeader())
+              followerLogs = server1.logs(0)
+            }
+
+            if(server2 !== leader) {
+              assert.ok(!server2.isLeader())
+              followerLogs = followerLogs || server2.logs(0)
+            }
+
+            if(server3 !== leader) {
+              assert.ok(!server3.isLeader())
+              followerLogs = followerLogs || server3.logs(0)
+            }
+
+            assert.ok(leader.logs())
+            assert.equal(leader.logs().length, 3)
+
+            for(var i = 0 ; i < leader.logs().length ; i++) {
+              var leaderLogEntry = leader.logs()[i]
+              var followerLogEntry = followerLogs[i]
+              assert.ok(_.isEqual(leaderLogEntry, followerLogEntry))
+            }
+            done()
+            
+          })
+        })
       })
         
     }
