@@ -92,7 +92,8 @@ describe('leader election', function() {
       assert.ok(electionDelay > expectedMinElectionDelayOnSplitVote,
                 'A split vote did not happen. The leader election happened in ' +
                 electionDelay + 'ms but it should be no faster than ' +
-                expectedMinElectionDelayOnSplitVote)
+                expectedMinElectionDelayOnSplitVote +
+                '. You may want to rerun this test, it may be a node timeout issue.')
       
       server1.stop()
       server2.stop()

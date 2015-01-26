@@ -63,14 +63,14 @@ function Raft(serverTransport) {
         prevLogTerm = null
       }
       
-      logger.info('leader sending',
-                   'term:', self._state.term(),
-                   'leaderId:', self._state.id(),
-                   'prevLogIndex:', prevLogIndex,
-                   'prevLogTerm:', prevLogTerm,
-                   'lastIndexSent:', lastIndexSent,
-                   'nextIndex:', nextIndex,
-                   'entries:', JSON.stringify(entries))
+      logger.info('leader', self.id(),
+                  'sending term:', self._state.term(),
+                  'leaderId:', self._state.id(),
+                  'prevLogIndex:', prevLogIndex,
+                  'prevLogTerm:', prevLogTerm,
+                  'lastIndexSent:', lastIndexSent,
+                  'nextIndex:', nextIndex,
+                  'entries:', JSON.stringify(entries))
 
       if((_.isUndefined(lastIndexSent) || _.isNull(lastIndexSent)) && entries.length > 0) {
         lastIndexSent = entries.length - 1
