@@ -68,6 +68,8 @@ raft.append({
   cmd: 'set',
   key: 'foobar',
   value: Date.now()
+}, function(err) {
+  // appended
 })
 
 raft.start(function() {
@@ -81,7 +83,28 @@ raft.on('leader', function() {
 
 ```
 
+Custom log management
+---------------------
 
+XX comes with a default log management whcih exposes the logs as a set of
+hashmap commands.
+
+Internally, the logs are managed through an API exposed by an event emitter. You
+can choose to either augment or replace the default behaviour by either
+listening or replacing the listeners:
+
+``
+var logEvents = raft.logsEvents()
+
+logEvents.on('commit', function(commitIndex) {
+
+})
+
+logEvents.on('append', function(logs) {
+
+})
+
+``
 
 Log Functionality
 =================
